@@ -28,7 +28,7 @@ jobs:
         run: make test
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
@@ -119,7 +119,7 @@ jobs:
           sha256sum */battop-* > checksums.txt
 
       - name: Create release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/*/battop-*
