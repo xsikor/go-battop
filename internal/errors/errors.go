@@ -18,6 +18,12 @@ var (
 
 	// ErrUIInit is returned when UI initialization fails
 	ErrUIInit = errors.New("failed to initialize UI")
+
+	// ErrPlatformNotSupported is returned when platform-specific features are not available
+	ErrPlatformNotSupported = errors.New("platform not supported")
+
+	// ErrFeatureNotAvailable is returned when a feature is not available on the current platform
+	ErrFeatureNotAvailable = errors.New("feature not available on this platform")
 )
 
 // BatteryError represents a battery-specific error
@@ -46,13 +52,13 @@ func NewBatteryError(index int, op string, err error) error {
 
 // ConfigError represents a configuration error
 type ConfigError struct {
-	Field string
-	Value interface{}
-	Err   error
+	Field    string
+	ValueStr string
+	Err      error
 }
 
 func (e *ConfigError) Error() string {
-	return fmt.Sprintf("config field %s (value: %v): %v", e.Field, e.Value, e.Err)
+	return fmt.Sprintf("config field %s (value: %s): %v", e.Field, e.ValueStr, e.Err)
 }
 
 func (e *ConfigError) Unwrap() error {
@@ -62,8 +68,8 @@ func (e *ConfigError) Unwrap() error {
 // NewConfigError creates a new configuration error
 func NewConfigError(field string, value interface{}, err error) error {
 	return &ConfigError{
-		Field: field,
-		Value: value,
-		Err:   err,
+		Field:    field,
+		ValueStr: fmt.Sprintf("%v", value),
+		Err:      err,
 	}
 }
