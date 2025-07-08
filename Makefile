@@ -5,7 +5,7 @@ BINARY_NAME := battop
 GO := go
 MAIN_PATH := cmd/battop/main.go
 BUILD_DIR := build
-VERSION := 0.3.0
+VERSION := 0.1.0
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "development")
 DATE := $(shell date -u +"%Y-%m-%d")
 LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
