@@ -10,14 +10,14 @@ import (
 	"github.com/xsikor/go-battop/internal/errors"
 )
 
-// Config interface to avoid circular imports
+// Config provides access to UI-related configuration settings
 type Config interface {
 	FormatPower(mW float64) string
 	FormatEnergy(mWh float64) string
 	FormatVoltage(v float64) string
 }
 
-// Interface manages the main UI
+// Interface manages the terminal-based battery monitoring UI
 type Interface struct {
 	root    *tview.Flex
 	view    *View
@@ -25,7 +25,7 @@ type Interface struct {
 	config  Config
 }
 
-// NewInterface creates a new UI interface
+// NewInterface creates a new UI interface with the given battery manager and configuration
 func NewInterface(manager *battery.Manager, config Config) (*Interface, error) {
 	if manager == nil {
 		return nil, fmt.Errorf("battery manager is nil")

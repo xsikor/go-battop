@@ -8,11 +8,17 @@ import (
 type State int
 
 const (
+	// StateUnknown indicates the battery state cannot be determined
 	StateUnknown State = iota
+	// StateEmpty indicates the battery is empty
 	StateEmpty
+	// StateFull indicates the battery is full
 	StateFull
+	// StateCharging indicates the battery is charging
 	StateCharging
+	// StateDischarging indicates the battery is discharging
 	StateDischarging
+	// StateNotCharging indicates the battery is not charging (but not necessarily discharging)
 	StateNotCharging
 )
 
@@ -34,7 +40,7 @@ func (s State) String() string {
 	}
 }
 
-// Info contains battery information
+// Info represents comprehensive battery information including state, capacity, and health metrics
 type Info struct {
 	// Index is the battery index (0-based)
 	Index int

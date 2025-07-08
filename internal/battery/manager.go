@@ -1,13 +1,14 @@
 package battery
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/distatus/battery"
-	"github.com/xsikor/go-battop/internal/errors"
+	pkgErrors "github.com/xsikor/go-battop/internal/errors"
 )
 
 // Manager manages battery information
@@ -28,21 +29,29 @@ func NewManager() *Manager {
 
 // Update updates battery information
 func (m *Manager) Update() error {
+	// ATTN: Early validation reduces nesting and improves readability
 	batteries, err := battery.GetAll()
 	if err != nil {
-		m.mu.Lock()
-		m.lastError = err
-		m.mu.Unlock()
-		return fmt.Errorf("failed to get batteries: %w", err)
+		return m.setLastError(fmt.Errorf("failed to get batteries: %w", err))
 	}
 
 	if len(batteries) == 0 {
-		m.mu.Lock()
-		m.lastError = errors.ErrNoBatteries
-		m.mu.Unlock()
-		return errors.ErrNoBatteries
+		return m.setLastError(pkgErrors.ErrNoBatteries)
 	}
 
+	// Happy path: convert and update battery information
+	infos := m.convertBatteriesToInfo(batteries)
+
+	m.mu.Lock()
+	m.batteries = infos
+	m.lastError = nil
+	m.mu.Unlock()
+
+	return nil
+}
+
+// convertBatteriesToInfo converts battery.Battery objects to our Info structs
+func (m *Manager) convertBatteriesToInfo(batteries []*battery.Battery) []*Info {
 	infos := make([]*Info, 0, len(batteries))
 	now := time.Now()
 
@@ -57,60 +66,22 @@ func (m *Manager) Update() error {
 			Voltage:       bat.Voltage,
 			DesignVoltage: bat.DesignVoltage,
 			UpdatedAt:     now,
+			Temperature:   0, // Not directly available in distatus/battery
 		}
 
-		// Read platform-specific battery stats
-		if platformStats, err := m.platformReader.ReadBatteryStats(i); err == nil {
-			info.CycleCount = platformStats.CycleCount
-			if platformStats.Technology != "" {
-				info.Technology = platformStats.Technology
-			} else {
-				info.Technology = "Li-ion" // Default if not available
-			}
-			if platformStats.Manufacturer != "" {
-				info.Manufacturer = platformStats.Manufacturer
-			}
-			if platformStats.ModelName != "" {
-				info.Model = platformStats.ModelName
-			}
-			if platformStats.SerialNumber != "" {
-				info.Serial = platformStats.SerialNumber
-			}
-		} else {
-			// Set defaults if platform stats not available
-			info.Technology = "Li-ion"
-			slog.Debug("Failed to read platform battery stats",
-				"index", i,
-				"error", err,
-			)
-		}
+		// Enrich with platform-specific data
+		m.enrichBatteryWithPlatformStats(info, i)
 
-		// Temperature is not directly available in distatus/battery
-		info.Temperature = 0
-
-		// For charge rate, ensure proper sign based on state
-		if info.State == StateDischarging && info.ChargeRate > 0 {
-			info.ChargeRate = -info.ChargeRate
-		}
+		// Ensure charge rate sign is correct
+		m.normalizeChargeRate(info)
 
 		infos = append(infos, info)
 
-		slog.Debug("Updated battery info",
-			"index", i,
-			"state", info.State.String(),
-			"current", info.Current,
-			"full", info.Full,
-			"charge_rate", info.ChargeRate,
-			"voltage", info.Voltage,
-		)
+		// Log the update
+		m.logBatteryUpdate(info, i)
 	}
 
-	m.mu.Lock()
-	m.batteries = infos
-	m.lastError = nil
-	m.mu.Unlock()
-
-	return nil
+	return infos
 }
 
 // GetAll returns all battery information
@@ -143,7 +114,7 @@ func (m *Manager) Get(index int) (*Info, error) {
 	}
 
 	if index < 0 || index >= len(m.batteries) {
-		return nil, errors.ErrBatteryNotFound
+		return nil, pkgErrors.ErrBatteryNotFound
 	}
 
 	// Return a copy to prevent data races
@@ -156,6 +127,83 @@ func (m *Manager) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.batteries)
+}
+
+// setLastError sets the last error with proper locking
+func (m *Manager) setLastError(err error) error {
+	m.mu.Lock()
+	m.lastError = err
+	m.mu.Unlock()
+	return err
+}
+
+// normalizeChargeRate ensures charge rate sign matches battery state
+func (m *Manager) normalizeChargeRate(info *Info) {
+	if info.State == StateDischarging && info.ChargeRate > 0 {
+		info.ChargeRate = -info.ChargeRate
+	}
+}
+
+// logBatteryUpdate logs battery update information
+func (m *Manager) logBatteryUpdate(info *Info, index int) {
+	slog.Debug("Updated battery info",
+		"index", index,
+		"state", info.State.String(),
+		"current", info.Current,
+		"full", info.Full,
+		"charge_rate", info.ChargeRate,
+		"voltage", info.Voltage,
+	)
+}
+
+// enrichBatteryWithPlatformStats applies platform-specific stats to battery info
+func (m *Manager) enrichBatteryWithPlatformStats(info *Info, index int) {
+	platformStats, err := m.platformReader.ReadBatteryStats(index)
+	if err != nil {
+		// Set defaults if platform stats not available
+		info.Technology = "Li-ion"
+
+		// Log appropriately based on error type
+		if errors.Is(err, pkgErrors.ErrPlatformNotSupported) {
+			slog.Debug("Platform-specific stats not available",
+				"index", index,
+				"platform", "non-linux",
+			)
+		} else {
+			slog.Warn("Failed to read platform battery stats",
+				"index", index,
+				"error", err,
+			)
+		}
+		return
+	}
+
+	// Apply available stats
+	info.CycleCount = platformStats.CycleCount
+
+	// Set technology with default fallback
+	info.Technology = coalesce(platformStats.Technology, "Li-ion")
+
+	// Set other fields if available
+	if platformStats.Manufacturer != "" {
+		info.Manufacturer = platformStats.Manufacturer
+	}
+	if platformStats.ModelName != "" {
+		info.Model = platformStats.ModelName
+	}
+	if platformStats.SerialNumber != "" {
+		info.Serial = platformStats.SerialNumber
+	}
+}
+
+// coalesce returns the first non-empty string
+func coalesce(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // convertState converts distatus/battery state to our state

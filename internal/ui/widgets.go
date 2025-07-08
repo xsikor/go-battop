@@ -63,8 +63,29 @@ func DrawBox(width, height int, title string) []string {
 	return lines
 }
 
-// CreateGradientBar creates a gradient progress bar
-func CreateGradientBar(percent float64, width int) string {
+// ProgressBarStyle defines the style of progress bar
+type ProgressBarStyle struct {
+	Full    string
+	Empty   string
+	Partial string
+}
+
+// Progress bar styles
+var (
+	ProgressBarStyleUnicode = ProgressBarStyle{
+		Full:    BarFull,
+		Empty:   BarEmpty,
+		Partial: BarPartial,
+	}
+	ProgressBarStyleASCII = ProgressBarStyle{
+		Full:    "=",
+		Empty:   "-",
+		Partial: "", // ASCII style doesn't use partial
+	}
+)
+
+// CreateProgressBar creates a progress bar with customizable style
+func CreateProgressBar(percent float64, width int, style ProgressBarStyle) string {
 	if width <= 0 {
 		return ""
 	}
@@ -77,23 +98,27 @@ func CreateGradientBar(percent float64, width int) string {
 		filled = width
 	}
 
-	// Create gradient effect
 	var bar strings.Builder
 
 	for i := 0; i < width; i++ {
 		if i < filled {
-			// Full blocks for filled portion
-			bar.WriteString(BarFull)
-		} else if i == filled && percent*float64(width)/100 > float64(filled) {
-			// Partial block for the transition
-			bar.WriteString(BarPartial)
-		} else {
-			// Empty blocks for unfilled portion
-			bar.WriteString(BarEmpty)
+			bar.WriteString(style.Full)
+			continue
 		}
+		// Use partial block if available and appropriate
+		if style.Partial != "" && i == filled && percent*float64(width)/100 > float64(filled) {
+			bar.WriteString(style.Partial)
+			continue
+		}
+		bar.WriteString(style.Empty)
 	}
 
 	return bar.String()
+}
+
+// CreateGradientBar creates a Unicode gradient progress bar (compatibility wrapper)
+func CreateGradientBar(percent float64, width int) string {
+	return CreateProgressBar(percent, width, ProgressBarStyleUnicode)
 }
 
 // FormatPercentage formats a percentage with color
@@ -106,20 +131,61 @@ func FormatPercentage(value float64, showSign bool) string {
 	return fmt.Sprintf("[%s]%s%.1f%%[-]", color, sign, value)
 }
 
-// getPercentageColor returns appropriate color for percentage
-func getPercentageColor(percent float64) string {
-	switch {
-	case percent >= 80:
-		return "green"
-	case percent >= 60:
-		return "yellow"
-	case percent >= 40:
-		return "orange"
-	case percent >= 20:
-		return "red"
-	default:
-		return "darkred"
+// ColorThresholds defines color thresholds for percentage values
+type ColorThresholds struct {
+	Excellent float64
+	Good      float64
+	Warning   float64
+	Critical  float64
+}
+
+// Default color threshold presets
+var (
+	ColorThresholdsDefault = ColorThresholds{
+		Excellent: 80,
+		Good:      50,
+		Warning:   20,
+		Critical:  0,
 	}
+
+	ColorThresholdsHealth = ColorThresholds{
+		Excellent: 80,
+		Good:      60,
+		Warning:   40,
+		Critical:  0,
+	}
+)
+
+// GetColorByThreshold returns appropriate color based on percentage and thresholds
+func GetColorByThreshold(percent float64, thresholds ColorThresholds) string {
+	if percent >= thresholds.Excellent {
+		return "green"
+	}
+	if percent >= thresholds.Good {
+		return "yellow"
+	}
+	if percent >= thresholds.Warning {
+		return "orange"
+	}
+	return "red"
+}
+
+// getPercentageColor returns appropriate color for percentage (compatibility wrapper)
+func getPercentageColor(percent float64) string {
+	// Use a more granular threshold for general percentages
+	if percent >= 80 {
+		return "green"
+	}
+	if percent >= 60 {
+		return "yellow"
+	}
+	if percent >= 40 {
+		return "orange"
+	}
+	if percent >= 20 {
+		return "red"
+	}
+	return "darkred"
 }
 
 // CenterText centers text within a given width

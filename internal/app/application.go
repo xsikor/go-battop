@@ -10,7 +10,7 @@ import (
 	"github.com/xsikor/go-battop/internal/ui"
 )
 
-// Application represents the main application
+// Application orchestrates the battery monitoring terminal UI application
 type Application struct {
 	config   *Config
 	tviewApp *tview.Application
@@ -24,7 +24,7 @@ type Application struct {
 	}
 }
 
-// New creates a new application instance
+// New creates and initializes a new Application with the given configuration
 func New(config *Config) *Application {
 	return &Application{
 		config:   config,
@@ -33,7 +33,7 @@ func New(config *Config) *Application {
 	}
 }
 
-// Run runs the application
+// Run starts the main application event loop and blocks until exit
 func (a *Application) Run() error {
 	slog.Info("Starting battop", "version", "0.3.0")
 
@@ -130,13 +130,20 @@ func (a *Application) processEvents() {
 		case EventTick:
 			// Update battery information
 			if err := a.manager.Update(); err != nil {
-				slog.Error("Failed to update batteries", "error", err)
+				slog.Error("Failed to update batteries",
+					"error", err,
+					"battery_count", a.manager.Count(),
+					"update_interval", a.config.Delay,
+				)
 				// Don't exit on update errors, just log them
 			}
 
 			// Update UI
 			if err := a.ui.Update(); err != nil {
-				slog.Error("Failed to update UI", "error", err)
+				slog.Error("Failed to update UI",
+					"error", err,
+					"battery_count", a.manager.Count(),
+				)
 			}
 
 			// Redraw

@@ -31,7 +31,6 @@ const (
 // Event represents an application event
 type Event struct {
 	Type EventType
-	Data interface{}
 }
 
 // EventManager manages application events
@@ -46,7 +45,7 @@ type EventManager struct {
 func NewEventManager(app *tview.Application, config *Config) *EventManager {
 	return &EventManager{
 		app:       app,
-		eventChan: make(chan Event, 100),
+		eventChan: make(chan Event, EventChannelBufferSize),
 		stopChan:  make(chan struct{}),
 		config:    config,
 	}

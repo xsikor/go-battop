@@ -8,15 +8,17 @@ import (
 	"github.com/xsikor/go-battop/internal/errors"
 )
 
-// Units represents the unit system to use for display
+// Units defines the measurement unit system for displaying battery values
 type Units string
 
 const (
-	UnitsHuman Units = "human" // W, Wh
-	UnitsRaw   Units = "raw"   // mW, mWh
+	// UnitsHuman displays values in human-readable units (W, Wh)
+	UnitsHuman Units = "human"
+	// UnitsRaw displays values in raw units (mW, mWh)
+	UnitsRaw Units = "raw"
 )
 
-// Config holds application configuration
+// Config defines the application configuration parameters
 type Config struct {
 	// Delay between updates
 	Delay time.Duration

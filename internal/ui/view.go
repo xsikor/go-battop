@@ -74,14 +74,14 @@ func NewView(index int, config Config) *View {
 		powerGauge:  tview.NewTextView(),
 		healthGauge: tview.NewTextView(),
 		chartArea:   tview.NewTextView(),
-		chartWidth:  80, // Default width
-		chartHeight: 20, // Default height
+		chartWidth:  DefaultChartWidth,
+		chartHeight: DefaultChartHeight,
 	}
 
 	// Create charts
-	v.voltageChart = NewChart("Voltage", 120, "V", "yellow")
-	v.powerChart = NewChart("Power", 120, "W", "green")
-	v.chargeChart = NewChart("Charge", 120, "%", "cyan")
+	v.voltageChart = NewChart("Voltage", MaxChartDataPoints, "V", "yellow")
+	v.powerChart = NewChart("Power", MaxChartDataPoints, "W", "green")
+	v.chargeChart = NewChart("Charge", MaxChartDataPoints, "%", "cyan")
 
 	// Create chart set
 	v.chartSet = NewChartSet()
@@ -174,14 +174,15 @@ func (v *View) Update(info *battery.Info) {
 
 	// Update charts with current dimensions
 	_, _, w, h := v.chartArea.GetInnerRect()
-	if w > 0 && h > 0 {
-		v.chartWidth = w
-		v.chartHeight = h
-	} else {
+	if w <= 0 || h <= 0 {
 		// Use defaults if dimensions not available yet
-		v.chartWidth = 80
-		v.chartHeight = 20
+		v.chartWidth = DefaultChartWidth
+		v.chartHeight = DefaultChartHeight
+		v.updateCharts()
+		return
 	}
+	v.chartWidth = w
+	v.chartHeight = h
 	v.updateCharts()
 }
 
@@ -189,192 +190,223 @@ func (v *View) Update(info *battery.Info) {
 func (v *View) updateInfoText(info *battery.Info) {
 	var text strings.Builder
 
-	// State with color
-	stateColor := getStateColor(info.State)
-	fmt.Fprintf(&text, "[%s:b]%s[-]\n", stateColor, info.State.String())
-
-	fmt.Fprintf(&text, "[gray]--------------------------------[-]\n")
-
-	// Manufacturer and model info
-	if info.Manufacturer != "" {
-		fmt.Fprintf(&text, "[cyan]Make:[-]      %s\n", info.Manufacturer)
-	}
-	if info.Model != "" {
-		fmt.Fprintf(&text, "[cyan]Model:[-]     %s\n", info.Model)
-	}
-
-	// Technology and basic info
-	fmt.Fprintf(&text, "[cyan]Type:[-]      %s\n", info.Technology)
-
-	// Voltage information
-	fmt.Fprintf(&text, "[cyan]Voltage:[-]   %s ", v.config.FormatVoltage(info.Voltage))
-	fmt.Fprintf(&text, "[gray](design: %s)[-]\n", v.config.FormatVoltage(info.DesignVoltage))
-
-	fmt.Fprintf(&text, "\n")
-
-	// Capacity information
-	fmt.Fprintf(&text, "[cyan]Current:[-]   %s\n", v.config.FormatEnergy(info.Current))
-	fmt.Fprintf(&text, "[cyan]Full:[-]      %s ", v.config.FormatEnergy(info.Full))
-
-	// Show battery health as percentage of design capacity
-	health := info.Health()
-	healthColor := getHealthColor(health)
-	fmt.Fprintf(&text, "[gray]([%s]%.1f%%[-] health)[-]\n", healthColor, health)
-
-	fmt.Fprintf(&text, "[cyan]Design:[-]    %s\n", v.config.FormatEnergy(info.Design))
-
-	// Time remaining
-	if info.State == battery.StateDischarging {
-		if tte := info.TimeToEmpty(); tte > 0 {
-			fmt.Fprintf(&text, "\n[orange]Time remaining: %s[-]\n", formatDuration(tte))
-		}
-	} else if info.State == battery.StateCharging {
-		if ttf := info.TimeToFull(); ttf > 0 {
-			fmt.Fprintf(&text, "\n[green]Time to full: %s[-]\n", formatDuration(ttf))
-		}
-	}
-
-	// Cycle count if available
-	if info.CycleCount > 0 {
-		fmt.Fprintf(&text, "\n[cyan]Cycles:[-]    %d\n", info.CycleCount)
-	}
-
-	// Last update
-	fmt.Fprintf(&text, "\n[gray]Updated: %s[-]", v.lastUpdate.Format("15:04:05"))
+	// Build each section
+	v.addBatteryState(&text, info)
+	v.addSeparator(&text)
+	v.addBatteryIdentity(&text, info)
+	v.addBatteryVoltage(&text, info)
+	v.addBatteryCapacity(&text, info)
+	v.addBatteryTimeRemaining(&text, info)
+	v.addBatteryCycles(&text, info)
+	v.addUpdateTimestamp(&text)
 
 	finalText := text.String()
 	slog.Debug("Updated info text", "length", len(finalText), "lines", strings.Count(finalText, "\n"))
 	v.infoText.SetText(finalText)
 }
 
+// addBatteryState adds the battery state line
+func (v *View) addBatteryState(text *strings.Builder, info *battery.Info) {
+	stateColor := getStateColor(info.State)
+	fmt.Fprintf(text, "[%s:b]%s[-]\n", stateColor, info.State.String())
+}
+
+// addSeparator adds a visual separator line
+func (v *View) addSeparator(text *strings.Builder) {
+	fmt.Fprintf(text, "[gray]--------------------------------[-]\n")
+}
+
+// addBatteryIdentity adds manufacturer, model, and type information
+func (v *View) addBatteryIdentity(text *strings.Builder, info *battery.Info) {
+	if info.Manufacturer != "" {
+		fmt.Fprintf(text, "[cyan]Make:[-]      %s\n", info.Manufacturer)
+	}
+	if info.Model != "" {
+		fmt.Fprintf(text, "[cyan]Model:[-]     %s\n", info.Model)
+	}
+	fmt.Fprintf(text, "[cyan]Type:[-]      %s\n", info.Technology)
+}
+
+// addBatteryVoltage adds voltage information
+func (v *View) addBatteryVoltage(text *strings.Builder, info *battery.Info) {
+	fmt.Fprintf(text, "[cyan]Voltage:[-]   %s ", v.config.FormatVoltage(info.Voltage))
+	fmt.Fprintf(text, "[gray](design: %s)[-]\n\n", v.config.FormatVoltage(info.DesignVoltage))
+}
+
+// addBatteryCapacity adds capacity and health information
+func (v *View) addBatteryCapacity(text *strings.Builder, info *battery.Info) {
+	fmt.Fprintf(text, "[cyan]Current:[-]   %s\n", v.config.FormatEnergy(info.Current))
+	fmt.Fprintf(text, "[cyan]Full:[-]      %s ", v.config.FormatEnergy(info.Full))
+
+	// Show battery health as percentage of design capacity
+	health := info.Health()
+	healthColor := getHealthColor(health)
+	fmt.Fprintf(text, "[gray]([%s]%.1f%%[-] health)[-]\n", healthColor, health)
+
+	fmt.Fprintf(text, "[cyan]Design:[-]    %s\n", v.config.FormatEnergy(info.Design))
+}
+
+// addBatteryTimeRemaining adds time to empty/full information
+func (v *View) addBatteryTimeRemaining(text *strings.Builder, info *battery.Info) {
+	if info.State == battery.StateDischarging {
+		if tte := info.TimeToEmpty(); tte > 0 {
+			fmt.Fprintf(text, "\n[orange]Time remaining: %s[-]\n", formatDuration(tte))
+		}
+	}
+	if info.State == battery.StateCharging {
+		if ttf := info.TimeToFull(); ttf > 0 {
+			fmt.Fprintf(text, "\n[green]Time to full: %s[-]\n", formatDuration(ttf))
+		}
+	}
+}
+
+// addBatteryCycles adds cycle count if available
+func (v *View) addBatteryCycles(text *strings.Builder, info *battery.Info) {
+	if info.CycleCount > 0 {
+		fmt.Fprintf(text, "\n[cyan]Cycles:[-]    %d\n", info.CycleCount)
+	}
+}
+
+// addUpdateTimestamp adds the last update timestamp
+func (v *View) addUpdateTimestamp(text *strings.Builder) {
+	fmt.Fprintf(text, "\n[gray]Updated: %s[-]", v.lastUpdate.Format(TimeFormat))
+}
+
 // updateGauges updates the gauge displays
 func (v *View) updateGauges(info *battery.Info) {
-	// Charge gauge with gradient effect
+	v.updateChargeGauge(info)
+	v.updatePowerGauge(info)
+	v.updateHealthGauge(info)
+}
+
+// updateChargeGauge updates the charge gauge display
+func (v *View) updateChargeGauge(info *battery.Info) {
 	chargePercent := info.ChargePercent()
 	chargeColor := getChargeColor(chargePercent)
-	chargeBar := createGradientProgressBar(chargePercent, 20, chargeColor)
-	chargeText := fmt.Sprintf(" %s [%s]%.1f%%[-]", chargeBar, chargeColor, chargePercent)
+	chargeBar := CreateProgressBar(chargePercent, ProgressBarWidth, ProgressBarStyleASCII)
+	chargeText := fmt.Sprintf(" [%s]%s[-] [%s]%.1f%%[-]", chargeColor, chargeBar, chargeColor, chargePercent)
 	v.chargeGauge.SetText(chargeText)
 	slog.Debug("Updated charge gauge", "percent", chargePercent, "text", chargeText)
+}
 
-	// Power gauge with visual indicator
+// updatePowerGauge updates the power gauge display
+func (v *View) updatePowerGauge(info *battery.Info) {
 	var powerText string
 	absPower := math.Abs(info.ChargeRate)
-	if info.ChargeRate > 0 {
-		// Charging
-		powerText = fmt.Sprintf(" [green]>>> CHARGING[-] [white]%s[-]", v.config.FormatPower(absPower))
-	} else if info.ChargeRate < 0 {
-		// Discharging
-		powerText = fmt.Sprintf(" [orange]<<< DISCHARGING[-] [white]%s[-]", v.config.FormatPower(absPower))
-	} else {
-		// Idle state
+
+	// Idle state
+	if info.ChargeRate == 0 {
 		powerText = fmt.Sprintf(" [gray]=== IDLE[-] [gray]%s[-]", v.config.FormatPower(0))
+		v.powerGauge.SetText(powerText)
+		slog.Debug("Updated power gauge", "chargeRate", info.ChargeRate, "text", powerText)
+		return
 	}
+
+	// Charging
+	if info.ChargeRate > 0 {
+		powerText = fmt.Sprintf(" [green]>>> CHARGING[-] [white]%s[-]", v.config.FormatPower(absPower))
+		v.powerGauge.SetText(powerText)
+		slog.Debug("Updated power gauge", "chargeRate", info.ChargeRate, "text", powerText)
+		return
+	}
+
+	// Discharging
+	powerText = fmt.Sprintf(" [orange]<<< DISCHARGING[-] [white]%s[-]", v.config.FormatPower(absPower))
 	v.powerGauge.SetText(powerText)
 	slog.Debug("Updated power gauge", "chargeRate", info.ChargeRate, "text", powerText)
+}
 
-	// Health gauge with gradient
+// updateHealthGauge updates the health gauge display
+func (v *View) updateHealthGauge(info *battery.Info) {
 	healthPercent := info.Health()
 	healthColor := getHealthColor(healthPercent)
-	healthBar := createGradientProgressBar(healthPercent, 20, healthColor)
-	healthText := fmt.Sprintf(" %s [%s]%.1f%%[-]", healthBar, healthColor, healthPercent)
+	healthBar := CreateProgressBar(healthPercent, ProgressBarWidth, ProgressBarStyleASCII)
+	healthText := fmt.Sprintf(" [%s]%s[-] [%s]%.1f%%[-]", healthColor, healthBar, healthColor, healthPercent)
 	v.healthGauge.SetText(healthText)
 	slog.Debug("Updated health gauge", "percent", healthPercent, "text", healthText)
 }
 
 // updateCharts updates the chart display
 func (v *View) updateCharts() {
-	// Use the tracked dimensions
-	width := v.chartWidth
-	height := v.chartHeight
-
-	// Don't update with invalid dimensions
-	if width <= 0 || height <= 0 {
-		slog.Debug("Skipping chart update - invalid dimensions", "width", width, "height", height)
+	if !v.validateChartDimensions() {
 		return
 	}
 
-	slog.Debug("Updating charts", "width", width, "height", height)
-
-	// Add title
 	var fullText strings.Builder
-	title := " Real-time Monitoring "
-	titleLen := len(title)
-	if width > titleLen {
-		padding := (width - titleLen) / 2
-		titleLine := fmt.Sprintf("[white::b]%s%s%s[-]",
-			strings.Repeat("─", padding),
-			title,
-			strings.Repeat("─", width-padding-titleLen))
-		fullText.WriteString(titleLine)
-		fullText.WriteString("\n")
-	}
-
-	// Update chart sizes (account for title)
-	v.chartSet.SetSize(width, height-1)
-
-	// Render and set the chart text
-	chartText := v.chartSet.Render()
-	if chartText == "" {
-		slog.Warn("Chart render returned empty string")
-	} else {
-		lines := strings.Split(chartText, "\n")
-		slog.Debug("Chart rendered", "lines", len(lines), "firstLine", lines[0])
-		if len(lines) > 1 {
-			slog.Debug("Chart second line", "line", lines[1])
-		}
-		fullText.WriteString(chartText)
-	}
+	v.renderChartTitle(&fullText)
+	v.renderChartContent(&fullText)
 
 	v.chartArea.Clear()
 	v.chartArea.SetText(fullText.String())
 }
 
-// Helper functions
-
-func createGradientProgressBar(percent float64, width int, color string) string {
-	filled := int(percent * float64(width) / 100)
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
+// validateChartDimensions checks if chart dimensions are valid
+func (v *View) validateChartDimensions() bool {
+	if v.chartWidth <= 0 || v.chartHeight <= 0 {
+		slog.Debug("Skipping chart update - invalid dimensions",
+			"width", v.chartWidth,
+			"height", v.chartHeight)
+		return false
 	}
 
-	var bar strings.Builder
-	bar.WriteString(fmt.Sprintf("[%s]", color))
-
-	// Use simple ASCII characters for compatibility
-	for i := 0; i < width; i++ {
-		if i < filled {
-			bar.WriteString("=") // Filled
-		} else {
-			bar.WriteString("-") // Empty
-		}
-	}
-
-	bar.WriteString("[-]")
-	return bar.String()
+	slog.Debug("Updating charts", "width", v.chartWidth, "height", v.chartHeight)
+	return true
 }
 
-func getChargeColor(percent float64) string {
-	if percent >= 80 {
-		return "green"
-	} else if percent >= 50 {
-		return "yellow"
-	} else if percent >= 20 {
-		return "orange"
+// renderChartTitle renders the chart title with decorative borders
+func (v *View) renderChartTitle(text *strings.Builder) {
+	const title = " Real-time Monitoring "
+	titleLen := len(title)
+
+	if v.chartWidth <= titleLen {
+		return
 	}
-	return "red"
+
+	leftPadding := (v.chartWidth - titleLen) / 2
+	rightPadding := v.chartWidth - leftPadding - titleLen
+
+	titleLine := fmt.Sprintf("[white::b]%s%s%s[-]",
+		strings.Repeat("─", leftPadding),
+		title,
+		strings.Repeat("─", rightPadding))
+
+	text.WriteString(titleLine)
+	text.WriteString("\n")
+}
+
+// renderChartContent renders the actual chart data
+func (v *View) renderChartContent(text *strings.Builder) {
+	// Update chart sizes (account for title)
+	v.chartSet.SetSize(v.chartWidth, v.chartHeight-1)
+
+	// Render charts
+	chartText := v.chartSet.Render()
+	if chartText == "" {
+		slog.Warn("Chart render returned empty string")
+		return
+	}
+
+	// Debug logging
+	lines := strings.Split(chartText, "\n")
+	slog.Debug("Chart rendered", "lines", len(lines))
+	if len(lines) > 0 {
+		slog.Debug("First line", "content", lines[0])
+	}
+	if len(lines) > 1 {
+		slog.Debug("Second line", "content", lines[1])
+	}
+
+	text.WriteString(chartText)
+}
+
+// Helper functions
+
+func getChargeColor(percent float64) string {
+	return GetColorByThreshold(percent, ColorThresholdsDefault)
 }
 
 func getHealthColor(percent float64) string {
-	if percent >= 80 {
-		return "green"
-	} else if percent >= 60 {
-		return "yellow"
-	}
-	return "red"
+	return GetColorByThreshold(percent, ColorThresholdsHealth)
 }
 
 func formatDuration(d time.Duration) string {

@@ -58,84 +58,99 @@ func (c *Chart) Render() string {
 		return " [gray]Initializing...[-]"
 	}
 
-	// Don't wait for data - render empty chart
 	if len(c.data.values) == 0 {
 		return c.renderEmptyChart()
 	}
 
-	// Calculate bounds
+	var result strings.Builder
 	min, max := c.calculateBounds()
 
-	// Create the chart
-	var result strings.Builder
+	c.renderTitle(&result)
+	c.renderChartBody(&result, min, max)
+	c.renderXAxis(&result)
+	result.WriteString(c.createTimeLabels())
 
-	// Title with decoration
+	return result.String()
+}
+
+// renderTitle renders the chart title with decorative borders
+func (c *Chart) renderTitle(result *strings.Builder) {
+	titleStr := c.prepareTitleString()
+	leftPad, rightPad := c.calculateTitlePadding(titleStr)
+
+	if leftPad > 0 {
+		result.WriteString(strings.Repeat("─", leftPad))
+	}
+	result.WriteString(fmt.Sprintf("[%s:b]%s[-]", c.color, titleStr))
+	if rightPad > 0 {
+		result.WriteString(strings.Repeat("─", rightPad))
+	}
+	result.WriteString("\n")
+}
+
+// prepareTitleString prepares the title string, truncating if necessary
+func (c *Chart) prepareTitleString() string {
 	titleStr := fmt.Sprintf(" %s ", c.title)
 	titleLen := len(titleStr)
 
 	if c.width < titleLen {
 		// Truncate title if too long
-		titleStr = c.title[:c.width-2] + " "
-		titleLen = len(titleStr)
+		return c.title[:c.width-2] + " "
+	}
+	return titleStr
+}
+
+// calculateTitlePadding calculates left and right padding for centered title
+func (c *Chart) calculateTitlePadding(titleStr string) (int, int) {
+	titleLen := len(titleStr)
+	totalPadding := c.width - titleLen
+
+	if totalPadding <= 0 {
+		return 0, 0
 	}
 
-	sidePadding := (c.width - titleLen) / 2
-	if sidePadding < 0 {
-		sidePadding = 0
-	}
+	leftPad := totalPadding / 2
+	rightPad := totalPadding - leftPad
+	return leftPad, rightPad
+}
 
-	remainingPadding := c.width - titleLen - sidePadding
-	if remainingPadding < 0 {
-		remainingPadding = 0
-	}
-
-	if sidePadding > 0 {
-		result.WriteString(strings.Repeat("─", sidePadding))
-	}
-	result.WriteString(fmt.Sprintf("[%s:b]%s[-]", c.color, titleStr))
-	if remainingPadding > 0 {
-		result.WriteString(strings.Repeat("─", remainingPadding))
-	}
-	result.WriteString("\n")
-
-	// Y-axis labels and chart area
-	chartHeight := c.height - 4 // Reserve space for title, x-axis, and time labels
-	if chartHeight < 3 {
-		chartHeight = 3
-	}
-
-	// Create the chart grid
+// renderChartBody renders the Y-axis labels and chart content
+func (c *Chart) renderChartBody(result *strings.Builder, min, max float64) {
+	chartHeight := c.calculateChartHeight()
 	grid := c.createGrid(min, max, chartHeight)
 
-	// Draw Y-axis labels and chart lines
 	for i := 0; i < chartHeight; i++ {
-		// Y-axis label with better formatting
-		yValue := max - (float64(i)/float64(chartHeight-1))*(max-min)
+		yValue := c.calculateYValue(i, chartHeight, min, max)
 		label := c.formatValue(yValue)
 
-		// Add axis decoration
-		if i == 0 {
-			result.WriteString(fmt.Sprintf("[gray]%8s ┤[-] ", label))
-		} else if i == chartHeight-1 {
-			result.WriteString(fmt.Sprintf("[gray]%8s ┤[-] ", label))
-		} else {
-			result.WriteString(fmt.Sprintf("[gray]%8s ┤[-] ", label))
-		}
-
-		// Chart line
+		result.WriteString(fmt.Sprintf("[gray]%8s ┤[-] ", label))
 		result.WriteString(grid[i])
 		result.WriteString("\n")
 	}
+}
 
-	// X-axis with better decoration
+// calculateChartHeight calculates the effective chart height
+func (c *Chart) calculateChartHeight() int {
+	chartHeight := c.height - ChartHeightReserve
+	if chartHeight < MinChartHeight {
+		return MinChartHeight
+	}
+	return chartHeight
+}
+
+// calculateYValue calculates the Y-axis value for a given row
+func (c *Chart) calculateYValue(row, totalRows int, min, max float64) float64 {
+	if totalRows <= 1 {
+		return max
+	}
+	return max - (float64(row)/float64(totalRows-1))*(max-min)
+}
+
+// renderXAxis renders the X-axis decoration
+func (c *Chart) renderXAxis(result *strings.Builder) {
 	result.WriteString(fmt.Sprintf("[gray]%8s └", ""))
-	result.WriteString(strings.Repeat("─", c.width-11))
+	result.WriteString(strings.Repeat("─", c.width-YAxisLabelWidth))
 	result.WriteString("[-]\n")
-
-	// Time labels
-	result.WriteString(c.createTimeLabels())
-
-	return result.String()
 }
 
 // calculateBounds calculates the min and max values for the chart
@@ -164,71 +179,102 @@ func (c *Chart) calculateBounds() (float64, float64) {
 		// If values are too close, add artificial range
 		min = min - 0.5
 		max = max + 0.5
-	} else {
-		padding := range_ * 0.1
-		min = min - padding
-		max = max + padding
+		return min, max
 	}
+
+	padding := range_ * 0.1
+	min = min - padding
+	max = max + padding
 
 	return min, max
 }
 
 // createGrid creates the chart grid with data points
 func (c *Chart) createGrid(min, max float64, height int) []string {
-	grid := make([]string, height)
-	// Account for y-axis labels: 8 chars for label + 3 chars for " ┤ " = 11 chars
-	chartWidth := c.width - 11
-
-	// Initialize grid with empty spaces
-	for i := 0; i < height; i++ {
-		grid[i] = strings.Repeat(" ", chartWidth)
-	}
+	chartWidth := c.calculateEffectiveChartWidth()
+	grid := c.initializeEmptyGrid(height, chartWidth)
 
 	if len(c.data.values) == 0 {
 		return grid
 	}
 
-	// Plot the data points
-	dataPoints := len(c.data.values)
-	startIdx := 0
-	if dataPoints > chartWidth {
-		startIdx = dataPoints - chartWidth
-	}
+	c.plotDataPoints(grid, min, max, height, chartWidth)
+	c.applyColorToGrid(grid)
 
-	for i := startIdx; i < dataPoints; i++ {
+	return grid
+}
+
+// calculateEffectiveChartWidth calculates the chart width minus Y-axis labels
+func (c *Chart) calculateEffectiveChartWidth() int {
+	return c.width - YAxisLabelWidth
+}
+
+// initializeEmptyGrid creates an empty grid filled with spaces
+func (c *Chart) initializeEmptyGrid(height, width int) []string {
+	grid := make([]string, height)
+	for i := 0; i < height; i++ {
+		grid[i] = strings.Repeat(" ", width)
+	}
+	return grid
+}
+
+// plotDataPoints plots all data points on the grid
+func (c *Chart) plotDataPoints(grid []string, min, max float64, height, chartWidth int) {
+	startIdx, endIdx := c.calculateVisibleDataRange(chartWidth)
+
+	for i := startIdx; i < endIdx; i++ {
 		x := i - startIdx
 		if x >= chartWidth {
 			break
 		}
 
-		value := c.data.values[i]
-		y := c.valueToY(value, min, max, height)
+		c.plotSinglePoint(grid, i, x, min, max, height, chartWidth, startIdx)
+	}
+}
 
-		if y >= 0 && y < height {
-			// Draw the point
-			line := []rune(grid[y])
-			if x < len(line) {
-				// Determine the character to use
-				char := c.getPlotChar(i, y, height, min, max)
-				line[x] = char
-			}
-			grid[y] = string(line)
-		}
+// calculateVisibleDataRange determines which data points are visible
+func (c *Chart) calculateVisibleDataRange(chartWidth int) (int, int) {
+	dataPoints := len(c.data.values)
+	startIdx := 0
+	if dataPoints > chartWidth {
+		startIdx = dataPoints - chartWidth
+	}
+	return startIdx, dataPoints
+}
 
-		// Draw vertical line to connect points
-		if i > startIdx {
-			prevValue := c.data.values[i-1]
-			prevY := c.valueToY(prevValue, min, max, height)
-			c.drawVerticalLine(grid, x, prevY, y, chartWidth, height)
-		}
+// plotSinglePoint plots a single data point and connects it to the previous point
+func (c *Chart) plotSinglePoint(grid []string, dataIdx, x int, min, max float64, height, chartWidth, startIdx int) {
+	value := c.data.values[dataIdx]
+	y := c.valueToY(value, min, max, height)
+
+	// Plot the point
+	if y >= 0 && y < height {
+		c.setGridPoint(grid, x, y, dataIdx, height, min, max)
 	}
 
-	// Color the plot
+	// Connect to previous point
+	if dataIdx > startIdx {
+		prevValue := c.data.values[dataIdx-1]
+		prevY := c.valueToY(prevValue, min, max, height)
+		c.drawVerticalLine(grid, x, prevY, y, chartWidth, height)
+	}
+}
+
+// setGridPoint sets a single point on the grid with the appropriate character
+func (c *Chart) setGridPoint(grid []string, x, y, dataIdx, height int, min, max float64) {
+	line := []rune(grid[y])
+	if x < len(line) {
+		char := c.getPlotChar(dataIdx, y, height, min, max)
+		line[x] = char
+		grid[y] = string(line)
+	}
+}
+
+// applyColorToGrid applies the chart color to all grid lines
+func (c *Chart) applyColorToGrid(grid []string) {
 	for i := range grid {
 		grid[i] = fmt.Sprintf("[%s]%s[-]", c.color, grid[i])
 	}
-
-	return grid
 }
 
 // valueToY converts a value to Y coordinate
@@ -264,7 +310,8 @@ func (c *Chart) getPlotChar(dataIdx, y, height int, min, max float64) rune {
 
 		if y < prevY && y < nextY {
 			return '/' // Peak
-		} else if y > prevY && y > nextY {
+		}
+		if y > prevY && y > nextY {
 			return '\\' // Valley
 		}
 	}
@@ -349,7 +396,7 @@ func (c *Chart) renderEmptyChart() string {
 	result.WriteString("\n")
 
 	// Y-axis labels and empty chart area
-	chartHeight := c.height - 4 // Reserve space for title, x-axis, and time labels
+	chartHeight := c.height - ChartHeightReserve
 	if chartHeight < 2 {
 		chartHeight = 2
 	}
@@ -360,7 +407,8 @@ func (c *Chart) renderEmptyChart() string {
 	if c.unit == "V" {
 		minVal = 0.0
 		maxVal = 20.0
-	} else if c.unit == "W" {
+	}
+	if c.unit == "W" {
 		minVal = -20.0
 		maxVal = 20.0
 	}
@@ -424,11 +472,12 @@ func (c *Chart) createTimeLabels() string {
 				if remainingSpace > 0 {
 					result.WriteString(strings.Repeat(" ", remainingSpace))
 				}
+				result.WriteString(fmt.Sprintf("[gray]%s", endTime.Format("15:04:05")))
 			} else {
 				// Not enough space for duration, just add spacing
 				result.WriteString(strings.Repeat(" ", spacing))
+				result.WriteString(fmt.Sprintf("[gray]%s", endTime.Format("15:04:05")))
 			}
-			result.WriteString(fmt.Sprintf("[gray]%s", endTime.Format("15:04:05")))
 		}
 	}
 
@@ -440,7 +489,8 @@ func (c *Chart) createTimeLabels() string {
 func formatChartDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
-	} else if d < time.Hour {
+	}
+	if d < time.Hour {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
