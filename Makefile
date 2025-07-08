@@ -86,6 +86,22 @@ dev:
 	@which air > /dev/null || (echo "air not installed. Install with: go install github.com/cosmtrek/air@latest" && exit 1)
 	air
 
+# GoReleaser targets
+check-goreleaser:
+	@echo "Checking GoReleaser configuration..."
+	@which goreleaser > /dev/null || (echo "goreleaser not installed. Install from https://goreleaser.com/install/" && exit 1)
+	goreleaser check
+
+release-local:
+	@echo "Creating local release (no publishing)..."
+	@which goreleaser > /dev/null || (echo "goreleaser not installed. Install from https://goreleaser.com/install/" && exit 1)
+	goreleaser release --snapshot --clean --skip-publish
+
+release-snapshot:
+	@echo "Creating snapshot release..."
+	@which goreleaser > /dev/null || (echo "goreleaser not installed. Install from https://goreleaser.com/install/" && exit 1)
+	goreleaser release --snapshot --clean
+
 # Show help
 help:
 	@echo "Available targets:"
@@ -101,4 +117,7 @@ help:
 	@echo "  make deps       - Update dependencies"
 	@echo "  make build-all  - Build for all platforms"
 	@echo "  make dev        - Start development mode with auto-reload"
+	@echo "  make check-goreleaser - Check GoReleaser configuration"
+	@echo "  make release-local    - Test release locally without publishing"
+	@echo "  make release-snapshot - Create snapshot release"
 	@echo "  make help       - Show this help message"

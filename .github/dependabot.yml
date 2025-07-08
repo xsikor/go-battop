@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Keep Go dependencies up to date
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+    reviewers:
+      - "{{ github.repository_owner }}"
+    labels:
+      - "dependencies"
+      - "go"
+    open-pull-requests-limit: 10
+    groups:
+      gomod:
+        patterns:
+          - "*"
+
+  # Keep GitHub Actions up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+    reviewers:
+      - "{{ github.repository_owner }}"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns:
+          - "*"

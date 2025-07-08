@@ -1,0 +1,130 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Go code is not formatted. Run 'make fmt'"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Run tests
+        run: make test
+
+      - name: Run tests with race detector
+        run: go test -race -v ./...
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -v ./cmd/battop
+
+      - name: Test binary
+        if: matrix.os != 'windows-latest'
+        run: |
+          ./battop -version
+
+      - name: Test binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          ./battop.exe -version
+
+  build-all-platforms:
+    name: Build all platforms
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Build for all platforms
+        run: |
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 go build -o /tmp/battop-linux-amd64 ./cmd/battop
+          
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 go build -o /tmp/battop-linux-arm64 ./cmd/battop
+          
+          # macOS AMD64
+          GOOS=darwin GOARCH=amd64 go build -o /tmp/battop-darwin-amd64 ./cmd/battop
+          
+          # macOS ARM64
+          GOOS=darwin GOARCH=arm64 go build -o /tmp/battop-darwin-arm64 ./cmd/battop
+          
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 go build -o /tmp/battop-windows-amd64.exe ./cmd/battop
+          
+          echo "Successfully built for all platforms"
+          ls -la /tmp/battop-*
