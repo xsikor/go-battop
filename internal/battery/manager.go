@@ -169,12 +169,13 @@ func (m *Manager) enrichBatteryWithPlatformStats(info *Info, index int) {
 				"index", index,
 				"platform", "non-linux",
 			)
-		} else {
-			slog.Warn("Failed to read platform battery stats",
-				"index", index,
-				"error", err,
-			)
+			return
 		}
+
+		slog.Warn("Failed to read platform battery stats",
+			"index", index,
+			"error", err,
+		)
 		return
 	}
 
